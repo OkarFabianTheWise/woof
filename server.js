@@ -50,43 +50,40 @@ app.post('/helius', (req, res) => {
                 
                 // Process SWAP transactions only
                 if (tx.type === "SWAP") {
-                    const transfers = tx.tokenTransfers || [];
-                    
                     let buyer = null;
-                    let maxTokenAmount = 0;
-                    let maxSol = 0;
-                    
-                    for (const t of transfers) {
-                        // Detect largest token transfer for tracked mint
-                        if (t.mint === TRACKED_TOKEN_MINT) {
-                            const tokenAmt = Math.abs(Number(t.tokenAmount || 0));
-                            
-                            if (tokenAmt > maxTokenAmount && t.toUserAccount) {
-                                maxTokenAmount = tokenAmt;
-                                buyer = t.toUserAccount;
-                            }
-                        }
-                        
-                        // Detect largest WSOL transfer
-                        if (t.mint === WSOL_MINT) {
-                            const solAmt = Math.abs(Number(t.tokenAmount || 0));
-                            
-                            if (solAmt > maxSol) {
-                                maxSol = solAmt;
+                    let solSpent = 0;
+
+                    const nativeChanges = tx.nativeBalanceChanges || [];
+                    const transfers = tx.tokenTransfers || [];
+
+                    for (const change of nativeChanges) {
+                        if (change.nativeBalanceChange < 0) {
+                            const wallet = change.userAccount;
+                            const sol = Math.abs(change.nativeBalanceChange) / 1e9;
+
+                            const received = transfers.find(t =>
+                                t.mint === TRACKED_TOKEN_MINT &&
+                                t.toUserAccount === wallet
+                            );
+
+                            if (received) {
+                                buyer = wallet;
+                                solSpent = sol;
+                                break;
                             }
                         }
                     }
-                    
+
                     if (buyer) {
-                        console.log("BUY DETECTED", buyer, maxSol);
-                        
+                        console.log("BUY DETECTED", buyer, solSpent);
+
                         // Broadcast to all connected WebSocket clients
                         const buyData = {
                             wallet: buyer,
-                            sol: maxSol,
+                            sol: solSpent,
                             timestamp: Date.now()
                         };
-                        
+
                         const message = JSON.stringify(buyData);
                         clients.forEach((client) => {
                             if (client.readyState === WebSocket.OPEN) {
