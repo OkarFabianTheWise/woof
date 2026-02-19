@@ -48,33 +48,33 @@ app.post('/helius', (req, res) => {
                 
                 // Process SWAP transactions only
                 if (tx.type === "SWAP") {
-                    // Find buyers: accounts with nativeBalanceChange < 0
-                    if (tx.accountData && Array.isArray(tx.accountData)) {
-                        tx.accountData.forEach(account => {
-                            const nativeBalanceChange = account.nativeBalanceChange || 0;
+                    // Find SOL payer from nativeTransfers array
+                    if (tx.nativeTransfers && Array.isArray(tx.nativeTransfers)) {
+                        tx.nativeTransfers.forEach(nativeTransfer => {
+                            // Buyer is the user where SOL is sent OUT (fromUserAccount)
+                            const buyer = nativeTransfer.fromUserAccount;
+                            const solAmountLamports = nativeTransfer.amount || 0;
                             
-                            // This account is a buyer if native balance decreased
-                            if (nativeBalanceChange < 0) {
-                                const wallet = account.account || account.userAccount || 'Unknown';
-                                
-                                // Check tokenBalanceChanges array for the tracked mint
-                                if (tx.tokenBalanceChanges && Array.isArray(tx.tokenBalanceChanges)) {
-                                    const tokenChange = tx.tokenBalanceChanges.find(change => 
-                                        change.mint === TRACKED_MINT && 
-                                        change.userAccount === wallet
+                            if (buyer && solAmountLamports > 0) {
+                                // Confirm BUY by checking tokenTransfers
+                                if (tx.tokenTransfers && Array.isArray(tx.tokenTransfers)) {
+                                    const tokenTransfer = tx.tokenTransfers.find(transfer => 
+                                        transfer.toUserAccount === buyer &&
+                                        transfer.mint === TRACKED_MINT &&
+                                        transfer.tokenAmount > 0
                                     );
                                     
-                                    // Confirm token balance increased for this buyer
-                                    if (tokenChange && tokenChange.tokenAmount > 0) {
-                                        const solAmount = Math.abs(nativeBalanceChange) / 1_000_000_000;
+                                    // BUY confirmed: buyer sent SOL and received tracked tokens
+                                    if (tokenTransfer) {
+                                        const solAmount = solAmountLamports / 1_000_000_000;
                                         
                                         console.log('BUY:');
-                                        console.log(`Wallet: ${wallet}`);
+                                        console.log(`Wallet: ${buyer}`);
                                         console.log(`SOL: ${solAmount}`);
                                         
                                         // Broadcast to all connected WebSocket clients
                                         const buyData = {
-                                            wallet: wallet,
+                                            wallet: buyer,
                                             sol: solAmount,
                                             timestamp: Date.now()
                                         };
