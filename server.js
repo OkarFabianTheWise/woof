@@ -27,6 +27,9 @@ wss.on('connection', (ws) => {
 
 app.use(express.json());
 
+// Tracked token mint address
+const TRACKED_MINT = process.env.TRACKED_MINT || 'GnkitxfvNLGGsXKGckU2Bw9uEnzwmVmJKzTaHpp1pump';
+
 app.post('/helius', (req, res) => {
     try {
         const webhook = req.body;
@@ -36,34 +39,45 @@ app.post('/helius', (req, res) => {
             webhook.forEach(tx => {
                 // Process SWAP transactions only
                 if (tx.type === "SWAP") {
-                    // Check account data for native balance changes
+                    // Find buyers: accounts with nativeBalanceChange < 0
                     if (tx.accountData && Array.isArray(tx.accountData)) {
                         tx.accountData.forEach(account => {
-                            // Buy = nativeBalanceChange is negative (money going out) AND token balance increases
                             const nativeBalanceChange = account.nativeBalanceChange || 0;
-                            const tokenBalanceChange = account.tokenBalanceChange || account.tokenBalance || 0;
                             
-                            if (nativeBalanceChange < 0 && tokenBalanceChange > 0) {
+                            // This account is a buyer if native balance decreased
+                            if (nativeBalanceChange < 0) {
                                 const wallet = account.account || account.userAccount || 'Unknown';
-                                const solAmount = Math.abs(nativeBalanceChange) / 1_000_000_000;
                                 
-                                console.log('BUY:');
-                                console.log(`Wallet: ${wallet}`);
-                                console.log(`SOL: ${solAmount}`);
-                                
-                                // Broadcast to all connected WebSocket clients
-                                const buyData = {
-                                    wallet: wallet,
-                                    sol: solAmount,
-                                    timestamp: Date.now()
-                                };
-                                
-                                const message = JSON.stringify(buyData);
-                                clients.forEach((client) => {
-                                    if (client.readyState === WebSocket.OPEN) {
-                                        client.send(message);
+                                // Check tokenBalanceChanges array for the tracked mint
+                                if (tx.tokenBalanceChanges && Array.isArray(tx.tokenBalanceChanges)) {
+                                    const tokenChange = tx.tokenBalanceChanges.find(change => 
+                                        change.mint === TRACKED_MINT && 
+                                        change.userAccount === wallet
+                                    );
+                                    
+                                    // Confirm token balance increased for this buyer
+                                    if (tokenChange && tokenChange.tokenAmount > 0) {
+                                        const solAmount = Math.abs(nativeBalanceChange) / 1_000_000_000;
+                                        
+                                        console.log('BUY:');
+                                        console.log(`Wallet: ${wallet}`);
+                                        console.log(`SOL: ${solAmount}`);
+                                        
+                                        // Broadcast to all connected WebSocket clients
+                                        const buyData = {
+                                            wallet: wallet,
+                                            sol: solAmount,
+                                            timestamp: Date.now()
+                                        };
+                                        
+                                        const message = JSON.stringify(buyData);
+                                        clients.forEach((client) => {
+                                            if (client.readyState === WebSocket.OPEN) {
+                                                client.send(message);
+                                            }
+                                        });
                                     }
-                                });
+                                }
                             }
                         });
                     }
