@@ -28,7 +28,7 @@ wss.on('connection', (ws) => {
 app.use(express.json());
 
 // Tracked token mint address
-const TRACKED_MINT = process.env.TRACKED_MINT || 'GnkitxfvNLGGsXKGckU2Bw9uEnzwmVmJKzTaHpp1pump';
+const TRACKED_TOKEN_MINT = process.env.TRACKED_MINT || "7K9NBMzAFvk5gfabciSJsZZRt2i7BB6oJdRSkyxsMMX8";
 // WSOL mint address
 const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -58,7 +58,7 @@ app.post('/helius', (req, res) => {
                     for (const t of transfers) {
                         // Detect buyer (receiving tracked token)
                         if (
-                            t.mint === TRACKED_MINT &&
+                            t.mint === TRACKED_TOKEN_MINT &&
                             t.toUserAccount
                         ) {
                             buyer = t.toUserAccount;
