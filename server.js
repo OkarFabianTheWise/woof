@@ -4,7 +4,7 @@ const app = express();
 app.use(express.json());
 
 app.post('/helius', (req, res) => {
-    console.log('Full request body:', JSON.stringify(req.body, null, 2));
+    console.log("Webhook received");
     res.status(200).send('OK');
 });
 
