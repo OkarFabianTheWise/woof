@@ -30,6 +30,9 @@ app.use(express.json());
 // Tracked token mint address
 const TRACKED_MINT = process.env.TRACKED_MINT || 'GnkitxfvNLGGsXKGckU2Bw9uEnzwmVmJKzTaHpp1pump';
 
+// Flag to log first transaction only
+let hasLoggedFirstTransaction = false;
+
 app.post('/helius', (req, res) => {
     try {
         const webhook = req.body;
@@ -37,6 +40,12 @@ app.post('/helius', (req, res) => {
         // Process each transaction in the webhook
         if (webhook && Array.isArray(webhook)) {
             webhook.forEach(tx => {
+                // Temporary logging: log full transaction object for first transaction only
+                if (!hasLoggedFirstTransaction) {
+                    console.log(JSON.stringify(tx, null, 2));
+                    hasLoggedFirstTransaction = true;
+                }
+                
                 // Process SWAP transactions only
                 if (tx.type === "SWAP") {
                     // Find buyers: accounts with nativeBalanceChange < 0
