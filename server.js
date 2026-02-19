@@ -51,26 +51,25 @@ app.post('/helius', (req, res) => {
                 // Process SWAP transactions only
                 if (tx.type === "SWAP") {
                     if (tx.tokenTransfers && Array.isArray(tx.tokenTransfers)) {
-                        // A) Find transfer where mint equals tracked token mint and toUserAccount exists → This is the BUYER
-                        const trackedTokenTransfer = tx.tokenTransfers.find(transfer => 
+                        // A) Find transfer where mint equals tracked token mint and toUserAccount exists
+                        const targetTokenTransfer = tx.tokenTransfers.find(transfer => 
                             transfer.mint === TRACKED_MINT &&
                             transfer.toUserAccount
                         );
                         
-                        // B) Find transfer where mint === WSOL → This is WSOL transfer
+                        // B) Find transfer where mint === WSOL
                         const wsolTransfer = tx.tokenTransfers.find(transfer => 
                             transfer.mint === WSOL_MINT
                         );
                         
-                        // BUY confirmed: buyer received tracked tokens and WSOL transfer exists
-                        if (trackedTokenTransfer && wsolTransfer && trackedTokenTransfer.toUserAccount) {
-                            const buyer = trackedTokenTransfer.toUserAccount;
-                            // Use WSOL tokenAmount as SOL amount (convert from token amount to SOL)
+                        // Only treat as BUY if BOTH transfers exist
+                        if (targetTokenTransfer && wsolTransfer) {
+                            const buyer = targetTokenTransfer.toUserAccount;
+                            // Convert tokenAmount from lamports to SOL
                             const solAmount = wsolTransfer.tokenAmount / 1_000_000_000;
                             
-                            console.log('BUY:');
-                            console.log(`Wallet: ${buyer}`);
-                            console.log(`SOL: ${solAmount}`);
+                            // Debug log
+                            console.log("BUY DETECTED", buyer, solAmount);
                             
                             // Broadcast to all connected WebSocket clients
                             const buyData = {
