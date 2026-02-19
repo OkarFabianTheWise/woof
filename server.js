@@ -50,41 +50,47 @@ app.post('/helius', (req, res) => {
                 
                 // Process SWAP transactions only
                 if (tx.type === "SWAP") {
-                    if (tx.tokenTransfers && Array.isArray(tx.tokenTransfers)) {
-                        // A) Find transfer where mint equals tracked token mint and toUserAccount exists
-                        const targetTokenTransfer = tx.tokenTransfers.find(transfer => 
-                            transfer.mint === TRACKED_MINT &&
-                            transfer.toUserAccount
-                        );
-                        
-                        // B) Find transfer where mint === WSOL
-                        const wsolTransfer = tx.tokenTransfers.find(transfer => 
-                            transfer.mint === WSOL_MINT
-                        );
-                        
-                        // Only treat as BUY if BOTH transfers exist
-                        if (targetTokenTransfer && wsolTransfer) {
-                            const buyer = targetTokenTransfer.toUserAccount;
-                            // Convert tokenAmount from lamports to SOL
-                            const solAmount = wsolTransfer.tokenAmount / 1_000_000_000;
-                            
-                            // Debug log
-                            console.log("BUY DETECTED", buyer, solAmount);
-                            
-                            // Broadcast to all connected WebSocket clients
-                            const buyData = {
-                                wallet: buyer,
-                                sol: solAmount,
-                                timestamp: Date.now()
-                            };
-                            
-                            const message = JSON.stringify(buyData);
-                            clients.forEach((client) => {
-                                if (client.readyState === WebSocket.OPEN) {
-                                    client.send(message);
-                                }
-                            });
+                    const transfers = tx.tokenTransfers || [];
+                    
+                    let buyer = null;
+                    let solAmount = 0;
+                    
+                    for (const t of transfers) {
+                        // Detect buyer (receiving tracked token)
+                        if (
+                            t.mint === TRACKED_MINT &&
+                            t.toUserAccount
+                        ) {
+                            buyer = t.toUserAccount;
                         }
+                        
+                        // Sum ALL WSOL transfers
+                        if (
+                            t.mint === WSOL_MINT
+                        ) {
+                            solAmount += Number(t.tokenAmount || 0);
+                        }
+                    }
+                    
+                    // Convert from lamports to SOL
+                    solAmount = solAmount / 1_000_000_000;
+                    
+                    if (buyer && solAmount > 0) {
+                        console.log("BUY DETECTED", buyer, solAmount);
+                        
+                        // Broadcast to all connected WebSocket clients
+                        const buyData = {
+                            wallet: buyer,
+                            sol: solAmount,
+                            timestamp: Date.now()
+                        };
+                        
+                        const message = JSON.stringify(buyData);
+                        clients.forEach((client) => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(message);
+                            }
+                        });
                     }
                 }
             });
