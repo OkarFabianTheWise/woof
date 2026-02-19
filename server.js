@@ -53,39 +53,40 @@ app.post('/helius', (req, res) => {
                     const transfers = tx.tokenTransfers || [];
                     
                     let buyer = null;
-                    let solAmount = 0;
+                    let maxTokenAmount = 0;
                     let maxSol = 0;
                     
                     for (const t of transfers) {
-                        // Detect buyer (receiving tracked token)
-                        if (
-                            t.mint === TRACKED_TOKEN_MINT &&
-                            t.toUserAccount
-                        ) {
-                            buyer = t.toUserAccount;
+                        // Detect largest token transfer for tracked mint
+                        if (t.mint === TRACKED_TOKEN_MINT) {
+                            const tokenAmt = Math.abs(Number(t.tokenAmount || 0));
+                            
+                            if (tokenAmt > maxTokenAmount && t.toUserAccount) {
+                                maxTokenAmount = tokenAmt;
+                                buyer = t.toUserAccount;
+                            }
                         }
                         
-                        // Detect WSOL transfers and find largest absolute tokenAmount
-                        if (
-                            t.mint === WSOL_MINT
-                        ) {
-                            const amount = Math.abs(Number(t.tokenAmount || 0));
-                            if (amount > maxSol) {
-                                maxSol = amount;
+                        // Detect largest WSOL transfer
+                        if (t.mint === WSOL_MINT) {
+                            const solAmt = Math.abs(Number(t.tokenAmount || 0));
+                            
+                            if (solAmt > maxSol) {
+                                maxSol = solAmt;
                             }
                         }
                     }
                     
                     // Convert from lamports to SOL
-                    solAmount = maxSol / 1_000_000_000;
+                    maxSol = maxSol / 1_000_000_000;
                     
-                    if (buyer && solAmount > 0.0001) {
-                        console.log("BUY DETECTED", buyer, solAmount);
+                    if (buyer && maxSol > 0.00001) {
+                        console.log("BUY DETECTED", buyer, maxSol);
                         
                         // Broadcast to all connected WebSocket clients
                         const buyData = {
                             wallet: buyer,
-                            sol: solAmount,
+                            sol: maxSol,
                             timestamp: Date.now()
                         };
                         
