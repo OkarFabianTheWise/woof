@@ -16,6 +16,10 @@ app.post("/helius", (req, res) => {
     const txs = Array.isArray(payload) ? payload : payload ? [payload] : [];
 
     for (const tx of txs) {
+      if (tx === txs[0]) {
+        console.log("TRANSFERS:", JSON.stringify(tx.tokenTransfers, null, 2));
+        console.log("NATIVE:", JSON.stringify(tx.nativeBalanceChanges, null, 2));
+      }
       if (tx?.transactionError) continue;
 
       const transfers = Array.isArray(tx.tokenTransfers) ? tx.tokenTransfers : [];
