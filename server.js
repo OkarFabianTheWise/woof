@@ -7,6 +7,7 @@ const server = http.createServer(app);
 
 // Tracked token mint address
 const TRACKED_TOKEN_MINT = process.env.TRACKED_MINT || "HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump";
+const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 // Global in-memory state
 const state = {
@@ -46,6 +47,72 @@ wss.on('connection', (ws) => {
 });
 
 app.use(express.json());
+
+// Parse buy from Helius transaction
+function parseBuyFromHeliusTx(tx) {
+    if (tx?.transactionError != null) return null;
+
+    const tokenTransfers = Array.isArray(tx?.tokenTransfers) ? tx.tokenTransfers : [];
+    const nativeBalanceChanges = Array.isArray(tx?.nativeBalanceChanges)
+        ? tx.nativeBalanceChanges
+        : [];
+
+    // 1️⃣ Find tracked token received
+    const receive = tokenTransfers.find((t) => {
+        if (!t) return false;
+        if (t.mint !== TRACKED_TOKEN_MINT) return false;
+        if (!t.toUserAccount) return false;
+        const amt = Number(t.tokenAmount);
+        return Number.isFinite(amt) && amt > 0;
+    });
+
+    if (!receive) return null;
+
+    const buyer = receive.toUserAccount;
+
+    let solSpent = 0;
+
+    // 2️⃣ Native SOL spent
+    const buyerNativeEntry = nativeBalanceChanges.find(
+        (x) => x && x.userAccount === buyer
+    );
+
+    if (buyerNativeEntry) {
+        const change = Number(buyerNativeEntry.nativeBalanceChange);
+        if (Number.isFinite(change) && change < 0) {
+            solSpent = (-change) / 1e9;
+        }
+    }
+
+    // 3️⃣ WSOL spent (Raydium / migrated)
+    if (solSpent <= 0) {
+        const wsolTransfer = tokenTransfers.find(
+            (t) =>
+                t.mint === WSOL_MINT &&
+                t.fromUserAccount === buyer &&
+                Number(t.tokenAmount) > 0
+        );
+
+        if (wsolTransfer) {
+            solSpent = Number(wsolTransfer.tokenAmount) / 1e9;
+        }
+    }
+
+    if (!(solSpent > 0)) {
+        return { skip: true, reason: "no_sol_spent" };
+    }
+
+    const signature = tx?.signature || tx?.transactionSignature || null;
+    const timestamp = tx?.timestamp || tx?.blockTime || Date.now();
+
+    return {
+        type: "BUY",
+        wallet: buyer,
+        sol: solSpent,
+        signature,
+        timestamp,
+    };
+}
 
 // Broadcast function
 function broadcast(data) {
@@ -92,88 +159,45 @@ app.post('/helius', (req, res) => {
         
         // Process each transaction
         for (const tx of transactions) {
-            // Skip if transaction has error
-            if (tx.transactionError !== null && tx.transactionError !== undefined) {
+            state.counters.txProcessed++;
+            processed++;
+            
+            // Parse buy from transaction
+            const result = parseBuyFromHeliusTx(tx);
+            
+            if (!result) {
+                // No buy detected (null returned)
                 skipped++;
                 continue;
             }
             
-            state.counters.txProcessed++;
-            processed++;
-            
-            // Detect BUY
-            let buyer = null;
-            let solSpent = 0;
-            
-            const transfers = tx.tokenTransfers || [];
-            const nativeChanges = tx.nativeBalanceChanges || [];
-            
-            // Step a: Find buyer (who received tracked token)
-            for (const t of transfers) {
-                if (t.mint === TRACKED_TOKEN_MINT && 
-                    Number(t.tokenAmount) > 0 && 
-                    t.toUserAccount) {
-                    buyer = t.toUserAccount;
-                    break;
-                }
-            }
-            
-            // Step b: Find buyer's nativeBalanceChange
-            if (buyer) {
-                const change = nativeChanges.find(n => n.userAccount === buyer);
-                
-                if (!change) {
-                    // Buyer found but no native balance change - skip
-                    state.counters.buysSkipped++;
-                    skipped++;
-                    continue;
-                }
-                
-                // Step c: BUY condition - must have spent SOL (negative change)
-                if (change.nativeBalanceChange < 0) {
-                    // Step d: Calculate SOL spent
-                    solSpent = Math.abs(change.nativeBalanceChange) / 1e9;
-                    
-                    if (solSpent > 0) {
-                        // Create buy event
-                        const buyEvent = {
-                            type: "BUY",
-                            wallet: buyer,
-                            sol: solSpent,
-                            signature: tx.signature || null,
-                            timestamp: tx.timestamp || Date.now()
-                        };
-                        
-                        // Broadcast to WebSocket clients
-                        broadcast(buyEvent);
-                        
-                        // Update state
-                        state.lastParsedBuy = {
-                            wallet: buyer,
-                            sol: solSpent,
-                            sig: tx.signature || null,
-                            ts: buyEvent.timestamp
-                        };
-                        
-                        state.counters.buysBroadcasted++;
-                        buys++;
-                        
-                        // Log buy
-                        const walletShort = buyer.length >= 4 ? buyer.slice(-4) : buyer;
-                        console.log(`BUY wallet=${walletShort} sol=${solSpent.toFixed(4)} sig=${tx.signature || 'N/A'}`);
-                    } else {
-                        state.counters.buysSkipped++;
-                        skipped++;
-                    }
-                } else {
-                    // Positive or zero balance change - not a buy (could be sell or transfer)
-                    state.counters.buysSkipped++;
-                    skipped++;
-                }
-            } else {
-                // No buyer found - not a buy for our token
+            if (result.skip) {
+                // Buy detected but skipped (e.g., no_sol_spent)
+                state.counters.buysSkipped++;
                 skipped++;
+                continue;
             }
+            
+            // Valid BUY detected
+            const buyEvent = result;
+            
+            // Broadcast to WebSocket clients
+            broadcast(buyEvent);
+            
+            // Update state
+            state.lastParsedBuy = {
+                wallet: buyEvent.wallet,
+                sol: buyEvent.sol,
+                sig: buyEvent.signature,
+                ts: buyEvent.timestamp
+            };
+            
+            state.counters.buysBroadcasted++;
+            buys++;
+            
+            // Log buy
+            const walletShort = buyEvent.wallet.length >= 4 ? buyEvent.wallet.slice(-4) : buyEvent.wallet;
+            console.log(`BUY wallet=${walletShort} sol=${buyEvent.sol.toFixed(4)} sig=${buyEvent.signature || 'N/A'}`);
         }
         
         // Log webhook summary
