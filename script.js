@@ -350,16 +350,19 @@ function addWinner(amount, wallet, txHash = null) {
     winnerItem.appendChild(winnerTx);
     
     const winnerData = { element: winnerItem, createdAt: Date.now() };
-    winnerItems.unshift(winnerData); // Add new winner to beginning
-    
-    // Insert at the top
+    winnerItems.unshift(winnerData);
+
+    if (winnerItems.length > maxVisibleWinners) {
+        const old = winnerItems.pop();
+        if (old && old.element && old.element.parentNode) old.element.remove();
+    }
+
     if (winnersList.firstChild) {
         winnersList.insertBefore(winnerItem, winnersList.firstChild);
     } else {
         winnersList.appendChild(winnerItem);
     }
-    
-    // All winners stay visible - scroll to see older ones beyond the viewport
+
     updateWinnersScrollIndicator();
 }
 
@@ -826,10 +829,17 @@ function renderBuys(data) {
   const container = document.querySelector("#recentBuys");
   if (!container || !Array.isArray(data)) return;
 
+  const latest15 = data.slice(0, 15);
   container.innerHTML = "";
   const now = Date.now();
 
-  data.forEach(buy => {
+  buyItems = latest15.map(buy => ({
+    amount: Number(buy.sol),
+    wallet: (buy.wallet && buy.wallet.length >= 4) ? buy.wallet.slice(-4).toUpperCase() : (buy.wallet || "????").toString().toUpperCase(),
+    createdAt: buy.time || now
+  }));
+
+  latest15.forEach(buy => {
     const walletShort = (buy.wallet && buy.wallet.length >= 4)
       ? buy.wallet.slice(-4).toUpperCase()
       : (buy.wallet || "????").toString().toUpperCase();
@@ -841,6 +851,12 @@ function renderBuys(data) {
     const buyItem = createBuyItem(amount, walletShort, secondsAgo);
     container.appendChild(buyItem);
   });
+
+  if (buyItems[0] && buyItems[0].amount >= 0.2 && !timerInterval && !winnerOverlay.classList.contains("show")) {
+    roundStartTime = buyItems[0].createdAt;
+    startTimer();
+  }
+  updateLeadingBuyDisplay();
 }
 
 setInterval(loadBuys, 1000);
