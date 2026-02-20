@@ -15,10 +15,10 @@ app.post("/helius", (req, res) => {
     const payload = req.body;
     const txs = Array.isArray(payload) ? payload : payload ? [payload] : [];
 
-    if (txs.length > 0) {
-      const tx = txs[0];
-      console.log("DEBUG SWAP STRUCTURE:");
-      console.log(JSON.stringify(tx, null, 2));
+    for (const tx of txs) {
+      console.log("TX TYPE:", tx.type);
+      console.log("HAS events:", !!tx.events);
+      console.log("HAS swap:", !!tx.events?.swap);
     }
 
     res.status(200).json({ ok: true });
