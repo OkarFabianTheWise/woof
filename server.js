@@ -64,7 +64,7 @@ wss.on('connection', (ws) => {
     });
 });
 
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 
 // Parse buy from Helius transaction
 function parseBuyFromHeliusTx(tx) {
@@ -257,8 +257,9 @@ app.post('/helius', (req, res) => {
     }
 });
 
-server.listen(3000, () => {
-    console.log('Server listening on port 3000');
+const PORT = parseInt(process.env.PORT, 10) || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log('Server listening on port', PORT);
     console.log('WebSocket server ready on /ws');
     console.log('Status endpoint: GET /status');
 });
