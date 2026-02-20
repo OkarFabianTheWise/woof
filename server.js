@@ -5,10 +5,16 @@ const TRACKED_TOKEN_MINT = "HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump";
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 const MIN_SOL = 0.001;
 
+const recentBuys = [];
+
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/status", (req, res) => {
   res.json({ ok: true });
+});
+
+app.get("/buys", (req, res) => {
+  res.json(recentBuys);
 });
 
 app.post("/helius", (req, res) => {
@@ -45,6 +51,13 @@ app.post("/helius", (req, res) => {
           "sol:",
           solSpent.toFixed(4)
         );
+
+        recentBuys.unshift({
+          wallet: buyer,
+          sol: solSpent,
+          time: Date.now()
+        });
+        if (recentBuys.length > 100) recentBuys.pop();
       }
     }
 
