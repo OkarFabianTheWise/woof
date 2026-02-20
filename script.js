@@ -833,13 +833,14 @@ function renderBuys(data) {
   container.innerHTML = "";
   const now = Date.now();
 
-  buyItems = latest15.map(buy => ({
+  const maxBuys = 15;
+  buyItems = latest15.slice(0, maxBuys).map(buy => ({
     amount: Number(buy.sol),
     wallet: (buy.wallet && buy.wallet.length >= 4) ? buy.wallet.slice(-4).toUpperCase() : (buy.wallet || "????").toString().toUpperCase(),
     createdAt: buy.time || now
   }));
 
-  latest15.forEach(buy => {
+  latest15.slice(0, maxBuys).forEach(buy => {
     const walletShort = (buy.wallet && buy.wallet.length >= 4)
       ? buy.wallet.slice(-4).toUpperCase()
       : (buy.wallet || "????").toString().toUpperCase();
@@ -851,6 +852,9 @@ function renderBuys(data) {
     const buyItem = createBuyItem(amount, walletShort, secondsAgo);
     container.appendChild(buyItem);
   });
+  while (container.children.length > maxBuys) {
+    container.removeChild(container.lastChild);
+  }
 
   if (buyItems[0] && buyItems[0].amount >= 0.2 && !timerInterval && !winnerOverlay.classList.contains("show")) {
     roundStartTime = buyItems[0].createdAt;
