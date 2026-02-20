@@ -17,7 +17,6 @@ app.post("/helius", (req, res) => {
 
     for (const tx of txs) {
       if (tx?.transactionError) continue;
-      if (tx?.type !== "SWAP") continue;
       if (!tx?.events?.swap) continue;
 
       const swap = tx.events.swap;
