@@ -824,18 +824,22 @@ async function loadBuys() {
 
 function renderBuys(data) {
   const container = document.querySelector("#recentBuys");
-  if (!container) return;
+  if (!container || !Array.isArray(data)) return;
 
   container.innerHTML = "";
+  const now = Date.now();
 
   data.forEach(buy => {
-    const div = document.createElement("div");
-    div.innerHTML = `
-      <div>
-        <b>${Number(buy.sol).toFixed(2)} SOL</b> — ${(buy.wallet || "").slice(0, 4)}...${(buy.wallet || "").slice(-4)}
-      </div>
-    `;
-    container.appendChild(div);
+    const walletShort = (buy.wallet && buy.wallet.length >= 4)
+      ? buy.wallet.slice(-4).toUpperCase()
+      : (buy.wallet || "????").toString().toUpperCase();
+    const sol = Number(buy.sol);
+    const amount = sol < 0.01 ? sol.toFixed(6) : sol.toFixed(2);
+    const secondsAgo = buy.time
+      ? Math.max(0, Math.floor((now - buy.time) / 1000))
+      : 0;
+    const buyItem = createBuyItem(amount, walletShort, secondsAgo);
+    container.appendChild(buyItem);
   });
 }
 
