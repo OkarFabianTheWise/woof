@@ -20,7 +20,7 @@ const newRoundText = document.getElementById('newRoundText');
 const particlesContainer = document.getElementById('particles');
 const particlesDirection = document.getElementById('particlesDirection');
 const particlesFreeze = document.getElementById('particlesFreeze');
-const buysList = document.getElementById('buysList');
+const buysList = document.getElementById('recentBuys');
 const leadingBuySection = document.getElementById('leadingBuySection');
 const leadingBuyDisplay = document.getElementById('leadingBuyDisplay');
 const winnersList = document.getElementById('winnersList');
@@ -736,36 +736,10 @@ function initBuysList() {
     setInterval(updateTimestamps, 1000);
 }
 
-// Poll /buys every 1s and replace recent buys UI (no WebSocket)
-function renderBuys(data) {
-    if (!buysList || !Array.isArray(data)) return;
-    buysList.innerHTML = "";
-    const now = Date.now();
-    for (const item of data) {
-        const walletShort = item.wallet && item.wallet.length >= 4
-            ? item.wallet.slice(-4).toUpperCase()
-            : (item.wallet || "????").toString().toUpperCase();
-        const sol = Number(item.sol);
-        const amount = sol < 0.01 ? sol.toFixed(6) : sol.toFixed(2);
-        const secondsAgo = item.time ? Math.max(0, Math.floor((now - item.time) / 1000)) : 0;
-        const buyItem = createBuyItem(amount, walletShort, secondsAgo);
-        buysList.appendChild(buyItem);
-    }
-}
-
-function pollBuys() {
-    fetch("/buys")
-        .then(res => res.json())
-        .then(data => renderBuys(data))
-        .catch(() => {});
-}
-
 // Initialize
 createParticles();
 // Timer will start when first buy of 0.2 SOL or more happens
 initBuysList();
-pollBuys();
-setInterval(pollBuys, 1000);
 
 // Cleanup WebSockets on page unload
 window.addEventListener('beforeunload', () => {
@@ -838,3 +812,32 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+async function loadBuys() {
+  try {
+    const res = await fetch("/buys");
+    const data = await res.json();
+    renderBuys(data);
+  } catch (e) {
+    console.log("Fetch error", e);
+  }
+}
+
+function renderBuys(data) {
+  const container = document.querySelector("#recentBuys");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  data.forEach(buy => {
+    const div = document.createElement("div");
+    div.innerHTML = `
+      <div>
+        <b>${Number(buy.sol).toFixed(2)} SOL</b> — ${(buy.wallet || "").slice(0, 4)}...${(buy.wallet || "").slice(-4)}
+      </div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+setInterval(loadBuys, 1000);
+loadBuys();
