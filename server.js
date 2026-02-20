@@ -94,7 +94,8 @@ function parseBuyFromHeliusTx(tx) {
         );
 
         if (wsolTransfer) {
-            solSpent = Number(wsolTransfer.tokenAmount) / 1e9;
+            // Helius enhanced usually gives UI amount already (NOT lamports)
+            solSpent = Number(wsolTransfer.tokenAmount);
         }
     }
 
