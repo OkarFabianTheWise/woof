@@ -1,10 +1,10 @@
+const fetch = require("node-fetch");
 const express = require("express");
 const WebSocket = require("ws");
 const app = express();
 
-// Helius WebSocket – use this URL
-const HELIUS_WS = "wss://mainnet.helius-rpc.com/?api-key=1fffa47b-183b-4542-a4de-97a5cc1929f5";
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "1fffa47b-183b-4542-a4de-97a5cc1929f5";
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+const HELIUS_WS = `wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 const TRACKED_TOKEN_MINT = "HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump";
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
@@ -83,19 +83,30 @@ function startHeliusWebSocket() {
       const signature = data?.params?.result?.value?.signature;
       if (!signature) return;
 
-      const res = await fetch(
-        `https://api.helius.xyz/v0/transactions/?api-key=${HELIUS_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ transactions: [signature] })
-        }
-      );
-      if (!res.ok) return;
-      const parsed = await res.json();
-      const txs = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+      let txs;
+      try {
+        const res = await fetch(
+          `https://api.helius.xyz/v0/transactions/?api-key=${HELIUS_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ transactions: [signature] })
+          }
+        );
 
-      for (const tx of txs) {
+        if (!res.ok) {
+          console.log("Enhanced API error:", res.status);
+          return;
+        }
+
+        txs = await res.json();
+      } catch (err) {
+        console.log("Enhanced API fetch failed:", err.message);
+        return;
+      }
+
+      const list = Array.isArray(txs) ? txs : txs ? [txs] : [];
+      for (const tx of list) {
         if (tx?.transactionError) continue;
         const swap = tx?.events?.swap;
         if (!swap) continue;
