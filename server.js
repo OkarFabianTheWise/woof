@@ -78,11 +78,12 @@ function startHeliusWebSocket() {
   });
 
   ws.on("message", async (msg) => {
-    console.log("WS RAW:", msg.toString());
     try {
       const data = JSON.parse(msg.toString());
-      const signature = data.params?.result?.value?.signature;
+      const signature = data?.params?.result?.value?.signature;
       if (!signature) return;
+
+      console.log("WS SIG:", signature);
 
       const res = await fetch(
         `https://api.helius.xyz/v0/transactions/?api-key=${HELIUS_API_KEY}`,
