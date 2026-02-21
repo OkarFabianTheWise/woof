@@ -98,10 +98,9 @@ function startHeliusWebSocket() {
       const logInfo = data.params.result;
       const signature = logInfo.value.signature;
 
-      console.log("WS TX:", signature);
-
+      // Always fetch full parsed transaction for final BUY detection (do not rely on logsSubscribe alone)
       const res = await fetch(
-        `https://api.helius.xyz/v0/transactions?api-key=${HELIUS_API_KEY}`,
+        `https://api.helius.xyz/v0/transactions/?api-key=${HELIUS_API_KEY}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -112,6 +111,7 @@ function startHeliusWebSocket() {
       const txs = await res.json();
       const list = Array.isArray(txs) ? txs : txs ? [txs] : [];
 
+      // Same BUY detection as webhook: TRACKED_TOKEN_MINT received + WSOL sent from same wallet
       for (const tx of list) {
         if (tx?.transactionError) continue;
 
@@ -131,7 +131,7 @@ function startHeliusWebSocket() {
           const solSpent = Number(wsolOut.tokenAmount || 0);
           if (solSpent < MIN_SOL) continue;
 
-          console.log("WS BUY:", signature, "wallet:", buyer, "sol:", solSpent.toFixed(4));
+          console.log("WS BUY:", buyer, solSpent);
 
           recentBuys.unshift({
             wallet: buyer,
