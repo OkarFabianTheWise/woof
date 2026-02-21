@@ -76,27 +76,30 @@ function startHeliusWebSocket() {
     );
 
     ws.on("open", () => {
-    console.log("Helius WebSocket connected");
-    try {
-      ws.send(JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "logsSubscribe",
-        params: [
-          { mentions: ["HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump"] },
-          { commitment: "processed" }
-        ]
-      }));
-    } catch (err) {
-      console.error("WS send on open:", err.message);
-    }
-  });
+      console.log("Helius WebSocket connected");
+      console.log("Sending logsSubscribe...");
+      try {
+        ws.send(JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "logsSubscribe",
+          params: [
+            { mentions: ["HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump"] },
+            { commitment: "processed" }
+          ]
+        }));
+        console.log("Subscription sent.");
+      } catch (err) {
+        console.error("WS send on open:", err.message);
+      }
+    });
 
   ws.on("error", (err) => {
     console.error("WS error:", err.message);
   });
 
   ws.on("message", async (msg) => {
+    console.log("WS RAW:", msg.toString());
     try {
       const data = JSON.parse(msg.toString() || "{}");
       const signature = data?.params?.result?.value?.signature;
