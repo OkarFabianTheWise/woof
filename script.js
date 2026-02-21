@@ -98,9 +98,8 @@ function startTimer() {
         if (timeLeft <= 0) {
             clearInterval(timerInterval);
             timerInterval = null;
-            // Store the current round's start time before showing winner (so we can find buys from this round)
             const currentRoundStartTime = roundStartTime;
-            // Mark round end - next round's leading must be after this
+            // Advance so no existing buy (incl. winner) can restart timer until overlay hides and we set it again
             roundStartTime = Date.now();
             showWinner(currentRoundStartTime);
         }
@@ -276,13 +275,14 @@ function showWinner(roundStartTimeForWinner = roundStartTime) {
         }
         isRunning = false;
         timeLeft = 10;
-        roundStartTime = Date.now(); // New round - only buys added after this can be leading
+        // New round starts only now: only buys after this moment can start the timer (prevents same winner winning again)
+        roundStartTime = Date.now();
         // Reset timer display but don't start counting yet
         timerDisplay.textContent = '10';
         timerDisplay.style.animation = 'timerPulse 1s ease-in-out infinite';
         timerDisplay.style.color = '#14f195';
         leadingBuySection?.classList.remove('visible');
-        // Timer will start when first buy of MIN_ELIGIBLE_BUY_SOL or more happens
+        // Timer will start only when a NEW eligible buy (after roundStartTime) arrives
     }, 8500);
 }
 
@@ -488,8 +488,8 @@ function addBuy(amount, wallet, timestamp, txHash = null, fullWallet = null) {
     // Update leading buy display when timer <= 9
     updateLeadingBuyDisplay();
     
-    // Restart timer only for new eligible buy in current round (not during winner display)
-    if (parseFloat(amount) >= MIN_ELIGIBLE_BUY_SOL && !winnerOverlay.classList.contains('show') && buyData.createdAt >= roundStartTime) {
+    // Restart timer only for a NEW eligible buy strictly after round start (not the previous winner)
+    if (parseFloat(amount) >= MIN_ELIGIBLE_BUY_SOL && !winnerOverlay.classList.contains('show') && buyData.createdAt > roundStartTime) {
         // Clear any existing interval
         if (timerInterval) {
             clearInterval(timerInterval);
@@ -731,14 +731,8 @@ function handlePumpFunData(data) {
     }
 }
 
-// Initialize buys list - only live data from WebSocket
+// Initialize buys list - poll /buys only (no WebSocket for buys)
 function initBuysList() {
-    // Connect to PumpFun WebSocket for live data (only if not paused)
-    if (!isTrackingPaused) {
-        connectPumpFunWebSocket();
-    }
-    
-    // Update timestamps every second
     setInterval(updateTimestamps, 1000);
 }
 
@@ -859,13 +853,13 @@ function renderBuys(data) {
     container.removeChild(container.lastChild);
   }
 
-  // Only start timer when there is an eligible buy from the current round (after roundStartTime)
-  if (buyItems[0] && buyItems[0].amount >= MIN_ELIGIBLE_BUY_SOL && buyItems[0].createdAt >= roundStartTime && !timerInterval && !winnerOverlay.classList.contains("show")) {
+  // Only start timer when there is a NEW eligible buy strictly after round start (same buy cannot win again)
+  if (buyItems[0] && buyItems[0].amount >= MIN_ELIGIBLE_BUY_SOL && buyItems[0].createdAt > roundStartTime && !timerInterval && !winnerOverlay.classList.contains("show")) {
     roundStartTime = buyItems[0].createdAt;
     startTimer();
   }
   updateLeadingBuyDisplay();
 }
 
-setInterval(loadBuys, 1000);
+setInterval(loadBuys, 500);
 loadBuys();
