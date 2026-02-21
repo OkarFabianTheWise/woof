@@ -9,6 +9,8 @@ const TRACKED_TOKEN_MINT = "HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump";
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 let recentBuys = [];
+const PROCESSED_SIGS_MAX = 500;
+const processedSignatures = new Set();
 
 function detectBuyFromTx(tx) {
   if (tx?.transactionError) return null;
@@ -65,13 +67,17 @@ function startHeliusWebSocket() {
   const ws = new WebSocket(HELIUS_WS);
 
   ws.on("open", () => {
-    console.log("Helius WebSocket connected");
     ws.send(JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
       method: "logsSubscribe",
       params: [
-        { mentions: ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"] },
+        {
+          mentions: [
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5gZ7W5u9S",
+            "RVKd61ztZW9fSh3M9V4xv3eVv7HqX4dQcUoWvJd9J9F"
+          ]
+        },
         { commitment: "processed" }
       ]
     }));
@@ -82,6 +88,13 @@ function startHeliusWebSocket() {
       const data = JSON.parse(msg.toString());
       const signature = data?.params?.result?.value?.signature;
       if (!signature) return;
+
+      if (processedSignatures.has(signature)) return;
+      if (processedSignatures.size >= PROCESSED_SIGS_MAX) {
+        const first = processedSignatures.values().next().value;
+        if (first !== undefined) processedSignatures.delete(first);
+      }
+      processedSignatures.add(signature);
 
       let txs;
       try {
@@ -94,14 +107,10 @@ function startHeliusWebSocket() {
           }
         );
 
-        if (!res.ok) {
-          console.log("Enhanced API error:", res.status);
-          return;
-        }
+        if (!res.ok) return;
 
         txs = await res.json();
       } catch (err) {
-        console.log("Enhanced API fetch failed:", err.message);
         return;
       }
 
@@ -129,19 +138,14 @@ function startHeliusWebSocket() {
         if (recentBuys.length > 15) recentBuys.pop();
         console.log("WS BUY:", swap.userAccount, solSpent);
       }
-    } catch (e) {
-      console.log("WS error:", e.message);
-    }
+    } catch (e) {}
   });
 
   ws.on("close", () => {
-    console.log("Helius WS closed. Reconnecting...");
     setTimeout(startHeliusWebSocket, 3000);
   });
 
-  ws.on("error", (err) => {
-    console.log("Helius WS error:", err.message);
-  });
+  ws.on("error", () => {});
 }
 
 const PORT = 3000;
