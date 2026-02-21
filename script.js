@@ -812,16 +812,6 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-async function loadBuys() {
-  try {
-    const res = await fetch("/buys");
-    const data = await res.json();
-    renderBuys(data);
-  } catch (e) {
-    console.log("Fetch error", e);
-  }
-}
-
 function renderBuys(data) {
   const container = document.querySelector("#recentBuys");
   if (!container || !Array.isArray(data)) return;
@@ -861,5 +851,11 @@ function renderBuys(data) {
   updateLeadingBuyDisplay();
 }
 
-setInterval(loadBuys, 500);
-loadBuys();
+setInterval(() => {
+  fetch("/buys")
+    .then(r => r.json())
+    .then(renderBuys);
+}, 1000);
+fetch("/buys")
+  .then(r => r.json())
+  .then(renderBuys);

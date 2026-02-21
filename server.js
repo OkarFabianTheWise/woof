@@ -4,11 +4,9 @@ const app = express();
 const TRACKED_TOKEN_MINT = "HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump";
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
-const recentBuys = [];
-const SEEN_SIGS_MAX = 2000;
-const seenSigs = new Set();
+let recentBuys = [];
 
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json());
 app.use(express.static(__dirname));
 
 app.get("/status", (req, res) => {
@@ -21,55 +19,51 @@ app.get("/buys", (req, res) => {
 
 app.post("/helius", (req, res) => {
   try {
-    const payload = req.body;
-    const txs = Array.isArray(payload) ? payload : payload ? [payload] : [];
+    const txs = Array.isArray(req.body) ? req.body : [req.body];
 
     for (const tx of txs) {
       if (tx?.transactionError) continue;
       if (tx?.type !== "SWAP") continue;
-      const swap = tx?.events?.swap;
-      if (!swap) continue;
+      if (!tx?.events?.swap) continue;
 
-      const sig = tx.signature;
-      if (seenSigs.has(sig)) continue;
-      seenSigs.add(sig);
-      if (seenSigs.size > SEEN_SIGS_MAX) {
-        const first = seenSigs.values().next().value;
-        if (first !== undefined) seenSigs.delete(first);
-      }
+      const swap = tx.events.swap;
 
-      const tokenOutputs = Array.isArray(swap.tokenOutputs) ? swap.tokenOutputs : [];
-      const hasTrackedOut = tokenOutputs.some((o) => o?.mint === TRACKED_TOKEN_MINT);
-      if (!hasTrackedOut) continue;
+      const buyOutput = swap.tokenOutputs?.find(
+        o => o.mint === TRACKED_TOKEN_MINT
+      );
+      if (!buyOutput) continue;
 
       let solSpent = 0;
-      if (swap.nativeInput > 0) {
-        solSpent = Number(swap.nativeInput);
+
+      if (swap.nativeInput && swap.nativeInput > 0) {
+        solSpent = swap.nativeInput;
       } else {
-        const tokenInputs = Array.isArray(swap.tokenInputs) ? swap.tokenInputs : [];
-        const wsolInput = tokenInputs.find((i) => i?.mint === WSOL_MINT);
-        if (wsolInput) solSpent = Number(wsolInput.tokenAmount || 0);
+        const wsolInput = swap.tokenInputs?.find(
+          i => i.mint === WSOL_MINT
+        );
+        if (wsolInput) {
+          solSpent = Number(wsolInput.tokenAmount || 0);
+        }
       }
+
       if (solSpent <= 0) continue;
 
-      const wallet = swap.userAccount;
-      if (!wallet) continue;
-
       recentBuys.unshift({
-        wallet,
+        wallet: swap.userAccount,
         sol: solSpent,
         time: Date.now(),
         sig: tx.signature
       });
+
       if (recentBuys.length > 50) recentBuys.pop();
 
-      console.log("BUY sig=" + sig + " wallet=" + wallet + " sol=" + solSpent);
+      console.log("BUY:", swap.userAccount, solSpent);
     }
 
-    res.status(200).json({ ok: true });
-  } catch (err) {
-    console.log("ERROR:", err.message);
-    res.status(200).json({ ok: true });
+    res.json({ ok: true });
+  } catch (e) {
+    console.log("Webhook error:", e.message);
+    res.json({ ok: true });
   }
 });
 
