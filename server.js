@@ -28,7 +28,7 @@ function detectBuyFromTx(tx) {
 
 function pushBuy(wallet, solSpent, sig) {
   recentBuys.unshift({ wallet, sol: solSpent, time: Date.now(), sig });
-  if (recentBuys.length > 50) recentBuys.pop();
+  if (recentBuys.length > 15) recentBuys.pop();
 }
 
 app.use(express.json());
@@ -70,7 +70,7 @@ function startHeliusWebSocket() {
       id: 1,
       method: "logsSubscribe",
       params: [
-        { mentions: [TRACKED_TOKEN_MINT] },
+        { mentions: ["HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump"] },
         { commitment: "processed" }
       ]
     }));
@@ -79,8 +79,8 @@ function startHeliusWebSocket() {
   ws.on("message", async (msg) => {
     try {
       const data = JSON.parse(msg.toString());
-      if (!data.params?.result?.value?.signature) return;
-      const signature = data.params.result.value.signature;
+      const signature = data.params?.result?.value?.signature;
+      if (!signature) return;
 
       const res = await fetch(
         `https://api.helius.xyz/v0/transactions/?api-key=${HELIUS_API_KEY}`,
@@ -95,10 +95,27 @@ function startHeliusWebSocket() {
       const txs = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
 
       for (const tx of txs) {
-        const buy = detectBuyFromTx(tx);
-        if (!buy) continue;
-        pushBuy(buy.wallet, buy.solSpent, buy.sig);
-        console.log("WS BUY:", buy.wallet, buy.solSpent);
+        if (tx?.transactionError) continue;
+        const swap = tx?.events?.swap;
+        if (!swap) continue;
+        const hasTrackedOut = swap.tokenOutputs?.some(o => o?.mint === TRACKED_TOKEN_MINT);
+        if (!hasTrackedOut) continue;
+        let solSpent = 0;
+        if (swap.nativeInput > 0) {
+          solSpent = Number(swap.nativeInput);
+        } else {
+          const wsolInput = swap.tokenInputs?.find(i => i?.mint === WSOL_MINT);
+          if (wsolInput) solSpent = Number(wsolInput.tokenAmount || 0);
+        }
+        if (solSpent <= 0 || !swap.userAccount) continue;
+        recentBuys.unshift({
+          wallet: swap.userAccount,
+          sol: solSpent,
+          time: Date.now(),
+          sig: signature
+        });
+        if (recentBuys.length > 15) recentBuys.pop();
+        console.log("WS BUY:", swap.userAccount, solSpent);
       }
     } catch (e) {
       console.log("WS error:", e.message);
