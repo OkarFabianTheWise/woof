@@ -71,13 +71,14 @@ function startHeliusWebSocket() {
       id: 1,
       method: "logsSubscribe",
       params: [
-        { mentions: ["HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump"] },
+        "all",
         { commitment: "processed" }
       ]
     }));
   });
 
   ws.on("message", async (msg) => {
+    console.log("WS RAW:", msg.toString());
     try {
       const data = JSON.parse(msg.toString());
       const signature = data.params?.result?.value?.signature;
