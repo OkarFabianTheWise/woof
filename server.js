@@ -16,14 +16,32 @@ const POOL_VAULT_ACCOUNTS = new Set([]);
 let recentBuys = [];
 const sigQueue = [];
 const sigSeen = new Set();
-let working = false;
+let processing = false;
 
 function enqueueSig(sig) {
   if (!sig || sigSeen.has(sig)) return;
   sigSeen.add(sig);
   sigQueue.push(sig);
-  if (sigSeen.size > 5000) sigSeen.clear();
 }
+
+async function processQueue() {
+  if (processing) return;
+  if (!sigQueue.length) return;
+
+  processing = true;
+  const sig = sigQueue.shift();
+
+  try {
+    console.log("PROCESSING SIG:", sig);
+    await handleSignature(sig);
+  } catch (err) {
+    console.error("SIG PROCESS ERROR:", err.message);
+  } finally {
+    processing = false;
+  }
+}
+
+setInterval(processQueue, 200);
 
 function parseBalanceAmount(uiTokenAmount) {
   if (!uiTokenAmount) return 0;
@@ -64,6 +82,7 @@ function detectBuysFromPrePost(pre, post) {
 }
 
 async function handleSignature(sig) {
+  console.log("HANDLE SIGNATURE CALLED:", sig);
   let res;
   try {
     res = await fetch(HELIUS_RPC, {
@@ -143,20 +162,6 @@ app.post("/helius", (req, res) => {
     res.json({ ok: true });
   }
 });
-
-setInterval(async () => {
-  if (working) return;
-  const sig = sigQueue.shift();
-  if (!sig) return;
-  working = true;
-  try {
-    await handleSignature(sig);
-  } catch (err) {
-    console.error("handleSignature:", err?.message || err);
-  } finally {
-    working = false;
-  }
-}, 150);
 
 function startHeliusWebSocket() {
   try {
