@@ -71,29 +71,44 @@ function detectBuysFromPrePostBalances(preTokenBalances, postTokenBalances) {
   return buyers;
 }
 
-const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
-
-/** Fetch transaction via standard RPC getTransaction; return tx.meta.preTokenBalances and postTokenBalances. */
 async function getTransactionMeta(signature) {
-  const res = await fetch(RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "getTransaction",
-      params: [signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }]
-    })
-  });
-  if (!res.ok) return { pre: [], post: [], meta: null };
-  const json = await res.json();
-  const tx = json?.result;
-  const meta = tx?.meta ?? null;
-  return {
-    pre: Array.isArray(meta?.preTokenBalances) ? meta.preTokenBalances : [],
-    post: Array.isArray(meta?.postTokenBalances) ? meta.postTokenBalances : [],
-    meta
-  };
+  const url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY || HELIUS_API_KEY}`;
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getTransaction",
+        params: [
+          signature,
+          {
+            encoding: "jsonParsed",
+            maxSupportedTransactionVersion: 0,
+            commitment: "confirmed"
+          }
+        ]
+      })
+    });
+
+    const data = await res.json();
+    const tx = data?.result;
+
+    if (tx && tx.meta) {
+      return {
+        pre: tx.meta.preTokenBalances || [],
+        post: tx.meta.postTokenBalances || [],
+        nativePre: tx.meta.preBalances || [],
+        nativePost: tx.meta.postBalances || []
+      };
+    }
+
+    await new Promise(r => setTimeout(r, 400));
+  }
+
+  return { pre: [], post: [], nativePre: [], nativePost: [] };
 }
 
 app.use(express.json({ limit: "2mb" }));
@@ -166,13 +181,13 @@ function startHeliusWebSocket() {
       const logInfo = data.params.result;
       const signature = logInfo.value.signature;
 
-      const { pre, post, meta } = await getTransactionMeta(signature);
+      const { pre, post, nativePre, nativePost } = await getTransactionMeta(signature);
       if (!wsFirstTxLogged) {
         wsFirstTxLogged = true;
         console.log("SIGNATURE:", signature);
         console.log("PRE BALANCES:", JSON.stringify(pre, null, 2));
         console.log("POST BALANCES:", JSON.stringify(post, null, 2));
-        console.log("NATIVE PRE/POST:", meta?.preBalances, meta?.postBalances);
+        console.log("NATIVE PRE/POST:", nativePre, nativePost);
       }
       const buyers = detectBuysFromPrePostBalances(pre, post);
 
