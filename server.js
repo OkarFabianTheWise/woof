@@ -1,3 +1,11 @@
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED REJECTION:", err);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+});
+
 const express = require("express");
 const WebSocket = require("ws");
 const app = express();
@@ -150,5 +158,9 @@ function startHeliusWebSocket() {
 const PORT = 3000;
 app.listen(PORT, () => {
   console.log("Server listening on port 3000");
-  startHeliusWebSocket();
+  try {
+    startHeliusWebSocket();
+  } catch (err) {
+    console.error("startHeliusWebSocket failed:", err);
+  }
 });
