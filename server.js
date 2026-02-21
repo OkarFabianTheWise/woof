@@ -7,8 +7,51 @@ const HELIUS_API_KEY = "1fffa47b-183b-4542-a4de-97a5cc1929f5";
 const TRACKED_TOKEN_MINT = "HACLKPh6WQ79gP9NuufSs9VkDUjVsk5wCdbBCjTLpump";
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 const MIN_SOL = 0.001;
+/** Pool/vault accounts to exclude from buyer list (add known pool PDAs if needed) */
+const POOL_VAULT_ACCOUNTS = new Set([]);
 
 const recentBuys = [];
+
+/**
+ * BUY detection via net balance change per wallet.
+ * Returns [{ wallet, solSpent }] for wallets that gained TRACKED_TOKEN and spent WSOL (real buyers).
+ * Ignores pool vault accounts.
+ */
+function detectBuysFromTransfers(transfers) {
+  const list = Array.isArray(transfers) ? transfers : [];
+  const balanceByWallet = Object.create(null); // wallet -> { [mint]: netChange }
+
+  for (const t of list) {
+    const amount = Number(t.tokenAmount ?? 0);
+    if (amount <= 0) continue;
+    const mint = t.mint;
+    const to = t.toUserAccount;
+    const from = t.fromUserAccount;
+
+    if (to) {
+      if (!balanceByWallet[to]) balanceByWallet[to] = Object.create(null);
+      balanceByWallet[to][mint] = (balanceByWallet[to][mint] || 0) + amount;
+    }
+    if (from) {
+      if (!balanceByWallet[from]) balanceByWallet[from] = Object.create(null);
+      balanceByWallet[from][mint] = (balanceByWallet[from][mint] || 0) - amount;
+    }
+  }
+
+  const buyers = [];
+  for (const wallet of Object.keys(balanceByWallet)) {
+    if (POOL_VAULT_ACCOUNTS.has(wallet)) continue;
+
+    const tokenNet = balanceByWallet[wallet][TRACKED_TOKEN_MINT] || 0;
+    const wsolNet = balanceByWallet[wallet][WSOL_MINT] || 0;
+
+    if (tokenNet > 0 && wsolNet < 0) {
+      const solSpent = Math.abs(wsolNet);
+      if (solSpent >= MIN_SOL) buyers.push({ wallet, solSpent });
+    }
+  }
+  return buyers;
+}
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(__dirname));
@@ -30,31 +73,10 @@ app.post("/helius", (req, res) => {
       if (tx?.transactionError) continue;
 
       const transfers = Array.isArray(tx.tokenTransfers) ? tx.tokenTransfers : [];
+      const buyers = detectBuysFromTransfers(transfers);
 
-      for (const transfer of transfers) {
-        if (transfer.mint !== TRACKED_TOKEN_MINT) continue;
-        if (!transfer.toUserAccount) continue;
-
-        const buyer = transfer.toUserAccount;
-
-        const wsolOut = transfers.find(t =>
-          t.mint === WSOL_MINT &&
-          t.fromUserAccount === buyer
-        );
-
-        if (!wsolOut) continue;
-
-        const solSpent = Number(wsolOut.tokenAmount || 0);
-        if (solSpent < MIN_SOL) continue;
-
-        console.log(
-          "BUY:",
-          tx.signature,
-          "wallet:",
-          buyer,
-          "sol:",
-          solSpent.toFixed(4)
-        );
+      for (const { wallet: buyer, solSpent } of buyers) {
+        console.log("BUY:", tx.signature, "wallet:", buyer, "sol:", solSpent.toFixed(4));
 
         recentBuys.unshift({
           wallet: buyer,
@@ -111,26 +133,14 @@ function startHeliusWebSocket() {
       const txs = await res.json();
       const list = Array.isArray(txs) ? txs : txs ? [txs] : [];
 
-      // Same BUY detection as webhook: TRACKED_TOKEN_MINT received + WSOL sent from same wallet
+      // BUY detection: net balance change (TRACKED_TOKEN + and WSOL -), ignore pool vaults
       for (const tx of list) {
         if (tx?.transactionError) continue;
 
         const transfers = Array.isArray(tx.tokenTransfers) ? tx.tokenTransfers : [];
+        const buyers = detectBuysFromTransfers(transfers);
 
-        for (const transfer of transfers) {
-          if (transfer.mint !== TRACKED_TOKEN_MINT) continue;
-          if (!transfer.toUserAccount) continue;
-
-          const buyer = transfer.toUserAccount;
-
-          const wsolOut = transfers.find(t =>
-            t.mint === WSOL_MINT && t.fromUserAccount === buyer
-          );
-          if (!wsolOut) continue;
-
-          const solSpent = Number(wsolOut.tokenAmount || 0);
-          if (solSpent < MIN_SOL) continue;
-
+        for (const { wallet: buyer, solSpent } of buyers) {
           console.log("WS BUY:", buyer, solSpent);
 
           recentBuys.unshift({
