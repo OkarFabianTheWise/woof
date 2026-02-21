@@ -12,45 +12,91 @@ const POOL_VAULT_ACCOUNTS = new Set([]);
 
 const recentBuys = [];
 
+function parseBalanceAmount(uiTokenAmount) {
+  if (!uiTokenAmount) return 0;
+  const s = uiTokenAmount.uiAmountString ?? String(uiTokenAmount.uiAmount ?? 0);
+  const n = parseFloat(s, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /**
- * BUY detection via net balance change per wallet.
- * Returns [{ wallet, solSpent }] for wallets that gained TRACKED_TOKEN and spent WSOL (real buyers).
- * Ignores pool vault accounts.
+ * BUY detection from preTokenBalances and postTokenBalances (no tokenTransfers).
+ * For each owner: trackedDelta = postTracked - preTracked, wsolDelta = postWSOL - preWSOL.
+ * If trackedDelta > 0 AND wsolDelta < 0 → BUY, solSpent = |wsolDelta|.
+ * If trackedDelta < 0 AND wsolDelta > 0 → SELL (ignored).
+ * Only push BUY wallets. Ignores pool vault accounts.
  */
-function detectBuysFromTransfers(transfers) {
-  const list = Array.isArray(transfers) ? transfers : [];
-  const balanceByWallet = Object.create(null); // wallet -> { [mint]: netChange }
+function detectBuysFromPrePostBalances(preTokenBalances, postTokenBalances) {
+  const pre = Array.isArray(preTokenBalances) ? preTokenBalances : [];
+  const post = Array.isArray(postTokenBalances) ? postTokenBalances : [];
 
-  for (const t of list) {
-    const amount = Number(t.tokenAmount ?? 0);
-    if (amount <= 0) continue;
-    const mint = t.mint;
-    const to = t.toUserAccount;
-    const from = t.fromUserAccount;
+  const preByOwnerMint = Object.create(null);  // owner -> mint -> amount
+  const postByOwnerMint = Object.create(null);
 
-    if (to) {
-      if (!balanceByWallet[to]) balanceByWallet[to] = Object.create(null);
-      balanceByWallet[to][mint] = (balanceByWallet[to][mint] || 0) + amount;
-    }
-    if (from) {
-      if (!balanceByWallet[from]) balanceByWallet[from] = Object.create(null);
-      balanceByWallet[from][mint] = (balanceByWallet[from][mint] || 0) - amount;
-    }
+  for (const e of pre) {
+    const owner = e.owner;
+    const mint = e.mint;
+    if (!owner || !mint) continue;
+    if (!preByOwnerMint[owner]) preByOwnerMint[owner] = Object.create(null);
+    preByOwnerMint[owner][mint] = (preByOwnerMint[owner][mint] || 0) + parseBalanceAmount(e.uiTokenAmount);
+  }
+  for (const e of post) {
+    const owner = e.owner;
+    const mint = e.mint;
+    if (!owner || !mint) continue;
+    if (!postByOwnerMint[owner]) postByOwnerMint[owner] = Object.create(null);
+    postByOwnerMint[owner][mint] = (postByOwnerMint[owner][mint] || 0) + parseBalanceAmount(e.uiTokenAmount);
   }
 
+  const allOwners = new Set([...Object.keys(preByOwnerMint), ...Object.keys(postByOwnerMint)]);
   const buyers = [];
-  for (const wallet of Object.keys(balanceByWallet)) {
-    if (POOL_VAULT_ACCOUNTS.has(wallet)) continue;
 
-    const tokenNet = balanceByWallet[wallet][TRACKED_TOKEN_MINT] || 0;
-    const wsolNet = balanceByWallet[wallet][WSOL_MINT] || 0;
+  for (const owner of allOwners) {
+    if (POOL_VAULT_ACCOUNTS.has(owner)) continue;
 
-    if (tokenNet > 0 && wsolNet < 0) {
-      const solSpent = Math.abs(wsolNet);
-      if (solSpent >= MIN_SOL) buyers.push({ wallet, solSpent });
+    const preTracked = (preByOwnerMint[owner] && preByOwnerMint[owner][TRACKED_TOKEN_MINT]) || 0;
+    const postTracked = (postByOwnerMint[owner] && postByOwnerMint[owner][TRACKED_TOKEN_MINT]) || 0;
+    const preWSOL = (preByOwnerMint[owner] && preByOwnerMint[owner][WSOL_MINT]) || 0;
+    const postWSOL = (postByOwnerMint[owner] && postByOwnerMint[owner][WSOL_MINT]) || 0;
+
+    const trackedDelta = postTracked - preTracked;
+    const wsolDelta = postWSOL - preWSOL;
+
+    if (trackedDelta > 0 && wsolDelta < 0) {
+      const solSpent = Math.abs(wsolDelta);
+      if (solSpent >= MIN_SOL) buyers.push({ wallet: owner, solSpent });
     }
+    // trackedDelta < 0 && wsolDelta > 0 → SELL, do not push
   }
   return buyers;
+}
+
+/** Get preTokenBalances and postTokenBalances from raw getTransaction (when enhanced API doesn't include them). */
+async function fetchPrePostBalances(signature) {
+  const res = await fetch(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getTransaction",
+      params: [signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }]
+    })
+  });
+  if (!res.ok) return { pre: [], post: [] };
+  const json = await res.json();
+  const meta = json?.result?.meta;
+  return {
+    pre: Array.isArray(meta?.preTokenBalances) ? meta.preTokenBalances : [],
+    post: Array.isArray(meta?.postTokenBalances) ? meta.postTokenBalances : []
+  };
+}
+
+function getPrePostFromTx(tx) {
+  const meta = tx?.meta;
+  const pre = (meta && meta.preTokenBalances) || tx.preTokenBalances || [];
+  const post = (meta && meta.postTokenBalances) || tx.postTokenBalances || [];
+  return { pre: Array.isArray(pre) ? pre : [], post: Array.isArray(post) ? post : [] };
 }
 
 app.use(express.json({ limit: "2mb" }));
@@ -64,7 +110,7 @@ app.get("/buys", (req, res) => {
   res.json(recentBuys);
 });
 
-app.post("/helius", (req, res) => {
+app.post("/helius", async (req, res) => {
   try {
     const payload = req.body;
     const txs = Array.isArray(payload) ? payload : payload ? [payload] : [];
@@ -72,8 +118,13 @@ app.post("/helius", (req, res) => {
     for (const tx of txs) {
       if (tx?.transactionError) continue;
 
-      const transfers = Array.isArray(tx.tokenTransfers) ? tx.tokenTransfers : [];
-      const buyers = detectBuysFromTransfers(transfers);
+      let { pre, post } = getPrePostFromTx(tx);
+      if (pre.length === 0 && post.length === 0 && tx.signature) {
+        const fetched = await fetchPrePostBalances(tx.signature);
+        pre = fetched.pre;
+        post = fetched.post;
+      }
+      const buyers = detectBuysFromPrePostBalances(pre, post);
 
       for (const { wallet: buyer, solSpent } of buyers) {
         console.log("BUY:", tx.signature, "wallet:", buyer, "sol:", solSpent.toFixed(4));
@@ -133,12 +184,17 @@ function startHeliusWebSocket() {
       const txs = await res.json();
       const list = Array.isArray(txs) ? txs : txs ? [txs] : [];
 
-      // BUY detection: net balance change (TRACKED_TOKEN + and WSOL -), ignore pool vaults
       for (const tx of list) {
         if (tx?.transactionError) continue;
 
-        const transfers = Array.isArray(tx.tokenTransfers) ? tx.tokenTransfers : [];
-        const buyers = detectBuysFromTransfers(transfers);
+        const sig = tx?.signature ?? signature;
+        let { pre, post } = getPrePostFromTx(tx);
+        if (pre.length === 0 && post.length === 0 && sig) {
+          const fetched = await fetchPrePostBalances(sig);
+          pre = fetched.pre;
+          post = fetched.post;
+        }
+        const buyers = detectBuysFromPrePostBalances(pre, post);
 
         for (const { wallet: buyer, solSpent } of buyers) {
           console.log("WS BUY:", buyer, solSpent);
