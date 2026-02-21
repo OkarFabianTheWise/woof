@@ -159,9 +159,12 @@ setInterval(async () => {
 }, 150);
 
 function startHeliusWebSocket() {
+  console.log("HELIUS_API_KEY:", process.env.HELIUS_API_KEY);
   try {
+    console.log("Connecting to:", HELIUS_WS);
     const ws = new WebSocket(HELIUS_WS);
     ws.on("open", () => {
+      console.log("WS OPEN EVENT FIRED");
       console.log("Helius WebSocket connected");
       try {
         ws.send(
@@ -172,6 +175,7 @@ function startHeliusWebSocket() {
             params: [{ mentions: [TRACKED_TOKEN_MINT] }, { commitment: "processed" }]
           })
         );
+        console.log("Subscription message sent");
       } catch (err) {}
     });
     ws.on("error", () => {});
