@@ -7,14 +7,11 @@ let timerInterval = null;
 let isRunning = false;
 let roundStartTime = 0; // Buys before this are from previous round (excluded from leading)
 
-// PumpFun token configuration
-// TODO: Set your PumpFun token address here (Solana token mint address)
-// Example: 'So11111111111111111111111111111111111111112' (replace with your token address)
-const TOKEN_ADDRESS = 'GnkitxfvNLGGsXKGckU2Bw9uEnzwmVmJKzTaHpp1pump';
-let pumpfunWS = null;
-let isWSConnected = false;
-let currentTokenAddress = TOKEN_ADDRESS;
-let isTrackingPaused = false; // Flag to pause/resume tracking
+// Local server connection
+const SERVER_URL = 'http://localhost:3000';
+let pollInterval = null;
+let isTrackingPaused = false;
+let lastProcessedBuys = new Set();
 
 // DOM elements
 const timerDisplay = document.getElementById('timerDisplay');
@@ -528,207 +525,71 @@ function updateTimestamps() {
     updateLeadingBuyDisplay();
 }
 
-// Pause WebSocket tracking
+// Pause tracking
 function pauseTracking() {
     isTrackingPaused = true;
-    console.log('⏸️ Pausing WebSocket tracking...');
-    if (pumpfunWS && isWSConnected) {
-        pumpfunWS.close();
-        pumpfunWS = null;
-        isWSConnected = false;
+    console.log('⏸️ Pausing tracking...');
+    if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
     }
 }
 
-// Call pauseTracking to pause tracking now
-pauseTracking();
-
-// Resume WebSocket tracking
+// Resume tracking
 function resumeTracking() {
     isTrackingPaused = false;
-    if (!isWSConnected && TOKEN_ADDRESS) {
-        console.log('▶️ Resuming WebSocket tracking...');
-        connectPumpFunWebSocket();
-    }
+    console.log('▶️ Resuming tracking...');
+    connectToServer();
 }
 
-// WebSocket connection to PumpPortal
-function connectPumpFunWebSocket() {
-    if (!TOKEN_ADDRESS) {
-        console.error('Token address not set. Please set TOKEN_ADDRESS in script.js');
-        return;
-    }
-    
+// Connect to local server and fetch buys
+async function connectToServer() {
     if (isTrackingPaused) {
         console.log('⏸️ Tracking is paused. Not connecting.');
         return;
     }
 
-    const wsUrl = 'wss://pumpportal.fun/api/data';
-    
-    try {
-        pumpfunWS = new WebSocket(wsUrl);
-        
-        pumpfunWS.onopen = () => {
-            console.log('✅ Connected to PumpPortal WebSocket');
-            isWSConnected = true;
-            currentTokenAddress = TOKEN_ADDRESS;
-            
-            // Subscribe to token trades - requires 'keys' parameter as array of strings
-            const subscribeMsg = {
-                method: 'subscribeTokenTrade',
-                keys: [TOKEN_ADDRESS]
-            };
-            console.log('📤 Sending subscription:', subscribeMsg);
-            pumpfunWS.send(JSON.stringify(subscribeMsg));
-            
-            // Subscribe to migration events
-            pumpfunWS.send(JSON.stringify({
-                method: 'subscribeMigration',
-                keys: [TOKEN_ADDRESS]
-            }));
-            
-            console.log('✅ Subscribed to token:', TOKEN_ADDRESS);
-        };
-        
-        pumpfunWS.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                console.log('WebSocket message received:', data);
-                handlePumpFunData(data);
-            } catch (err) {
-                console.error('Error parsing WebSocket data:', err, event.data);
-            }
-        };
-        
-        pumpfunWS.onerror = (error) => {
-            console.error('❌ WebSocket error:', error);
-            console.error('Error details:', error.message || error);
-            isWSConnected = false;
-        };
-        
-        pumpfunWS.onclose = (event) => {
-            console.log('⚠️ WebSocket closed. Code:', event.code, 'Reason:', event.reason);
-            isWSConnected = false;
-            // Reconnect after 3 seconds only if not paused
-            if (!isTrackingPaused) {
-                setTimeout(() => {
-                    console.log('🔄 Attempting to reconnect...');
-                    connectPumpFunWebSocket();
-                }, 3000);
-            }
-        };
-    } catch (error) {
-        console.error('Failed to connect to WebSocket:', error);
-        // Retry connection after 3 seconds only if not paused
-        if (!isTrackingPaused) {
-            setTimeout(connectPumpFunWebSocket, 3000);
-        }
-    }
-}
+    console.log('📡 Starting to poll buys from server...');
 
-// Handle incoming PumpFun data
-function handlePumpFunData(data) {
-    // Skip if tracking is paused
-    if (isTrackingPaused) {
-        return;
+    if (pollInterval) {
+        clearInterval(pollInterval);
     }
-    
-    // Skip error messages and subscription confirmations
-    if (data.errors || data.message) {
-        return;
-    }
-    
-    // PumpPortal sends trade data directly with signature, mint, traderPublicKey, txType, solAmount
-    // Check if this looks like a trade object
-    if (data.signature && data.mint && data.traderPublicKey && data.txType) {
-        console.log('Processing trade data:', data);
-        
-        // Extract trade information from PumpPortal format
-        const solAmount = data.solAmount || 0;
-        const wallet = data.traderPublicKey || '';
-        const txHash = data.signature || '';
-        const isBuy = data.txType === 'buy';
-        
-        console.log('Extracted values:', { solAmount, wallet, txHash, isBuy });
-        
-        // Only process buy transactions
-        if (isBuy && solAmount > 0 && wallet) {
-            // solAmount is already in SOL (not lamports) from PumpPortal
-            const solAmountFormatted = parseFloat(solAmount).toFixed(2);
+
+    pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`${SERVER_URL}/buys`);
+            if (!response.ok) return;
             
-            // Extract last 4 characters of wallet for display
-            const walletShort = wallet.length >= 4 ? wallet.slice(-4).toUpperCase() : wallet.toUpperCase();
+            const buys = await response.json();
             
-            console.log('✅ Adding buy:', solAmountFormatted, 'SOL from', walletShort);
-            
-            // Add buy with real-time data (pass short wallet for display, full wallet and txHash for storage)
-            addBuy(solAmountFormatted, walletShort, 0, txHash, wallet);
-        } else {
-            console.log('⏭️ Skipping trade - not a buy or missing data:', { isBuy, solAmount, wallet });
-        }
-    } else {
-        // Try alternative data structures (fallback)
-        const trade = data.params || data.data || data.result || data.trade || data.transaction || data;
-        
-        if (trade && (trade.signature || trade.tx || trade.transaction)) {
-            console.log('Processing alternative trade format:', trade);
-            
-            let solAmount = trade.solAmount || trade.sol_amount || trade.amount || trade.amountIn || 
-                           trade.quoteAmount || trade.nativeAmount || trade.native_amount || 
-                           trade.sol || trade.solValue || 0;
-            let wallet = trade.traderPublicKey || trade.user || trade.account || trade.buyer || 
-                        trade.trader || trade.wallet || trade.userWallet || trade.owner || 
-                        trade.signer || trade.publicKey || '';
-            const txHash = trade.signature || trade.tx || trade.transaction || trade.txHash || '';
-            const isBuy = trade.txType === 'buy' || (trade.isBuy !== false && trade.side !== 'sell' && trade.type !== 'sell');
-            
-            if (isBuy && solAmount > 0 && wallet) {
-                let solAmountFormatted;
-                if (solAmount > 1e6) {
-                    solAmountFormatted = (solAmount / 1e9).toFixed(2);
-                } else {
-                    solAmountFormatted = parseFloat(solAmount).toFixed(2);
+            // Process new buys (avoid duplicates)
+            if (Array.isArray(buys)) {
+                for (const buy of buys) {
+                    const buyId = buy.sig || `${buy.wallet}-${buy.sol}-${buy.time}`;
+                    
+                    if (!lastProcessedBuys.has(buyId)) {
+                        lastProcessedBuys.add(buyId);
+                        
+                        // Only keep last 100 processed buys to avoid memory leak
+                        if (lastProcessedBuys.size > 100) {
+                            const arr = Array.from(lastProcessedBuys);
+                            arr.slice(0, arr.length - 100).forEach(id => lastProcessedBuys.delete(id));
+                        }
+                        
+                        if (buy.sol > 0 && buy.wallet) {
+                            const solAmount = parseFloat(buy.sol).toFixed(2);
+                            const walletShort = buy.wallet.length >= 4 ? buy.wallet.slice(-4).toUpperCase() : buy.wallet.toUpperCase();
+                            
+                            console.log('✅ Adding buy:', solAmount, 'SOL from', walletShort);
+                            addBuy(solAmount, walletShort, 0, buy.sig, buy.wallet);
+                        }
+                    }
                 }
-                
-                const walletShort = wallet.length >= 4 ? wallet.slice(-4).toUpperCase() : wallet.toUpperCase();
-                
-                console.log('✅ Adding buy (alternative format):', solAmountFormatted, walletShort);
-                addBuy(solAmountFormatted, walletShort, 0, txHash, wallet);
             }
+        } catch (err) {
+            console.error('Error fetching buys:', err);
         }
-    }
-    
-    // Handle migration events
-    if (data.type === 'migration' || data.method === 'migration' || data.event === 'migration' ||
-        (data.data && data.data.type === 'migration')) {
-        
-        const migration = data.params || data.data || data;
-        const newTokenAddress = migration.newToken || migration.new_token || migration.token || migration.tokenAddress || TOKEN_ADDRESS;
-        
-        console.log('Token migrated. New address:', newTokenAddress);
-        
-        // Resubscribe to the new token if address changed
-        if (newTokenAddress && newTokenAddress !== currentTokenAddress && isWSConnected && pumpfunWS) {
-            // Unsubscribe from old token
-            if (currentTokenAddress) {
-                pumpfunWS.send(JSON.stringify({
-                    method: 'unsubscribeTokenTrade',
-                    params: [currentTokenAddress]
-                }));
-            }
-            
-            // Update current token address
-            currentTokenAddress = newTokenAddress;
-            
-            // Subscribe to new token
-            pumpfunWS.send(JSON.stringify({
-                method: 'subscribeTokenTrade',
-                params: [newTokenAddress]
-            }));
-            
-            console.log('Resubscribed to new token after migration:', newTokenAddress);
-        }
-    }
+    }, 500);
 }
 
 // Initialize buys list - poll /buys only (no WebSocket for buys)
@@ -740,13 +601,8 @@ function initBuysList() {
 createParticles();
 // Timer will start when first buy of MIN_ELIGIBLE_BUY_SOL or more happens
 initBuysList();
-
-// Cleanup WebSockets on page unload
-window.addEventListener('beforeunload', () => {
-    if (pumpfunWS && isWSConnected) {
-        pumpfunWS.close();
-    }
-});
+// Start polling for buys from server
+resumeTracking();
 
 // Winners list scroll indicator
 if (winnersList) {
@@ -824,19 +680,19 @@ function renderBuys(data) {
   const maxBuys = 15;
   buyItems = latest15.slice(0, maxBuys).map(buy => ({
     amount: Number(buy.sol),
-    wallet: (buy.wallet && buy.wallet.length >= 4) ? buy.wallet.slice(-4).toUpperCase() : (buy.wallet || "????").toString().toUpperCase(),
-    createdAt: buy.time || now
+        wallet: (buy.wallet && buy.wallet.length >= 4) ? buy.wallet.slice(-4).toUpperCase() : (buy.wallet || "????").toString().toUpperCase(),
+        // Ensure createdAt is milliseconds
+        createdAt: (typeof buy.time === 'number' ? (buy.time < 1e12 ? buy.time * 1000 : buy.time) : now)
   }));
 
-  latest15.slice(0, maxBuys).forEach(buy => {
+    latest15.slice(0, maxBuys).forEach(buy => {
     const walletShort = (buy.wallet && buy.wallet.length >= 4)
       ? buy.wallet.slice(-4).toUpperCase()
       : (buy.wallet || "????").toString().toUpperCase();
     const sol = Number(buy.sol);
     const amount = sol < 0.01 ? sol.toFixed(6) : sol.toFixed(2);
-    const secondsAgo = buy.time
-      ? Math.max(0, Math.floor((now - buy.time) / 1000))
-      : 0;
+        const buyTimeMs = (typeof buy.time === 'number' ? (buy.time < 1e12 ? buy.time * 1000 : buy.time) : now);
+        const secondsAgo = Math.max(0, Math.floor((now - buyTimeMs) / 1000));
     const buyItem = createBuyItem(amount, walletShort, secondsAgo);
     container.appendChild(buyItem);
   });
@@ -853,12 +709,12 @@ function renderBuys(data) {
 }
 
 setInterval(() => {
-  fetch("/buys")
+    fetch(`${SERVER_URL}/buys`)
+        .then((r) => r.json())
+        .then(renderBuys)
+        .catch(() => {});
+}, 300);
+fetch(`${SERVER_URL}/buys`)
     .then((r) => r.json())
     .then(renderBuys)
     .catch(() => {});
-}, 300);
-fetch("/buys")
-  .then((r) => r.json())
-  .then(renderBuys)
-  .catch(() => {});
