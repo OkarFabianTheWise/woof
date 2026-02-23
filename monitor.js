@@ -3,9 +3,9 @@ import express from "express";
 // Module-level defaults (can be overridden by startHeliusMonitor)
 let HELIUS_API_KEY = process.env.HELIUS_API_KEY || "";
 let TOKEN_MINT = process.env.TRACKED_TOKEN_MINT || "BKQucpTXB2d67jSNXMznSTj2iNLVtyga9JW86QoWpump";
-let WEBHOOK_PORT = 5000;
-let WEBHOOK_URL = process.env.WEBHOOK_URL || `https://2ba3-98-97-77-88.ngrok-free.app/webhook`;
-const SERVER_URL = process.env.SERVER_URL || "http://localhost:3000"; // Backend server for storing buy events
+let WEBHOOK_PORT = process.env.PORT || 5000;
+let WEBHOOK_URL = process.env.WEBHOOK_URL || `https://${process.env.RENDER_EXTERNAL_URL || "localhost:3000"}/webhook`;
+const SERVER_URL = process.env.SERVER_URL || `https://${process.env.RENDER_EXTERNAL_URL || "localhost:3000"}`; // Backend server for storing buy events
 
 // External callback provided by caller (server.js) to receive buy events
 let externalOnBuy = null;
