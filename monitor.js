@@ -4,8 +4,9 @@ import express from "express";
 let HELIUS_API_KEY = process.env.HELIUS_API_KEY || "";
 let TOKEN_MINT = process.env.TRACKED_TOKEN_MINT || "BKQucpTXB2d67jSNXMznSTj2iNLVtyga9JW86QoWpump";
 let WEBHOOK_PORT = process.env.PORT || 5000;
-let WEBHOOK_URL = process.env.WEBHOOK_URL || `https://${process.env.RENDER_EXTERNAL_URL || "localhost:3000"}/webhook`;
-const SERVER_URL = process.env.SERVER_URL || `https://${process.env.RENDER_EXTERNAL_URL || "localhost:3000"}`; // Backend server for storing buy events
+// Always use Render's external URL when available (ignore WEBHOOK_URL env var)
+let WEBHOOK_URL = process.env.RENDER_EXTERNAL_URL ? `https://${process.env.RENDER_EXTERNAL_URL}/webhook` : `http://localhost:${WEBHOOK_PORT}/webhook`;
+let SERVER_URL = process.env.RENDER_EXTERNAL_URL ? `https://${process.env.RENDER_EXTERNAL_URL}` : "http://localhost:3000"; // Backend server for storing buy events
 
 // External callback provided by caller (server.js) to receive buy events
 let externalOnBuy = null;
